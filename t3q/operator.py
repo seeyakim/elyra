@@ -217,6 +217,10 @@ class ExecuteFileOp(ContainerOp):
             if self.pipeline_outputs:
                 outputs_str = self._artifact_list_to_str(self.pipeline_outputs)
                 argument_list.append('--outputs "{}" '.format(outputs_str))
+                ####add here to add output artifacts####2-(1)###
+                for output_file_pipeline in self.pipeline_outputs:
+                    kwargs['file_outputs'][output_file_pipeline.rsplit('.')[0]] = '/jupyter-work-dir/{}'.format(output_file_pipeline)
+                ##############################################
 
             if self.emptydir_volume_size:
                 argument_list.append('--user-volume-path "{}" '.format(self.python_user_lib_path))
