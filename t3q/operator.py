@@ -219,9 +219,14 @@ class ExecuteFileOp(ContainerOp):
 
         # We must deal with the envs after the superclass initialization since these amend the
         # container attribute that isn't available until now.
+        #####1-(1)############################
         if self.pipeline_envs:
             for key, value in self.pipeline_envs.items():  # Convert dict entries to format kfp needs
-                self.container.add_env_variable(V1EnvVar(name=key, value=value))
+                if key not in ['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY','ELYRA_ENABLE_PIPELINE_INFO','ELYRA_WRITABLE_CONTAINER_DIR']:
+                  self.container.add_env_variable(V1EnvVar(name=key, value="{{inputs.parameters."+key+"}}"))
+                else:
+                  self.container.add_env_variable(V1EnvVar(name=key, value=value))
+        ##########################################
 
         # If crio volume size is found then assume kubeflow pipelines environment is using CRI-o as
         # its container runtime
