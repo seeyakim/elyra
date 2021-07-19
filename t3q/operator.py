@@ -210,7 +210,7 @@ class ExecuteFileOp(ContainerOp):
             if self.pipeline_inputs:
                 input_file_list=[]
                 for input_file_pipeline in self.pipeline_inputs:
-                    input_file_list.append(InputArgumentPath(input=input_file_pipeline.rsplit('.')[0], path= '/jupyter-work-dir/{}'.format(input_file_pipeline)))
+                    input_file_list.append(InputArgumentPath(argument=None, input=input_file_pipeline.rsplit('.')[0], path= '/jupyter-work-dir/{}'.format(input_file_pipeline)))
                 kwargs['artifact_argument_path']=input_file_list
            ###########################################################################
 
