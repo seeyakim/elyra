@@ -16,6 +16,7 @@
 import ast
 from datetime import datetime
 import json
+import logging
 import os
 import re
 import tempfile
@@ -31,7 +32,6 @@ from kfp import Client as ArgoClient
 from kfp import compiler as kfp_argo_compiler
 from kfp import components as components
 from kfp.aws import use_aws_secret  # noqa H306
-from kfp_notebook.pipeline import NotebookOp
 from kfp_server_api.exceptions import ApiException
 from kfp_tekton import compiler as kfp_tekton_compiler
 from kfp_tekton import TektonClient
@@ -40,6 +40,7 @@ from urllib3.exceptions import LocationValueError
 from urllib3.exceptions import MaxRetryError
 
 from elyra._version import __version__
+from elyra.kfp.operator import ExecuteFileOp
 from elyra.metadata.manager import MetadataManager
 from elyra.pipeline.component_parser_kfp import KfpComponentParser
 from elyra.pipeline.pipeline import Operation
@@ -68,6 +69,7 @@ class KfpPipelineProcessor(RuntimePipelineProcessor):
 
     def process(self, pipeline):
         """Runs a pipeline on Kubeflow Pipelines
+
         Each time a pipeline is processed, a new version
         is uploaded and run under the same experiment name.
         """
@@ -327,16 +329,13 @@ class KfpPipelineProcessor(RuntimePipelineProcessor):
 
             description = f'Created with Elyra {__version__} pipeline editor using {pipeline.source}.'
 
-            for key, operation in defined_pipeline.items():
-                if operation.classifier not in ["execute-notebook-node", "execute-python-node", "execute-r-node"]:
-                    continue
-                self.log.debug("component:\n "
-                               "container op name : %s \n "
-                               "inputs : %s \n "
-                               "outputs : %s \n ",
-                               operation.name,
-                               operation.inputs,
-                               operation.outputs)
+            if self.log.isEnabledFor(logging.DEBUG):
+                self.log.debug(f"Exporting pipeline {pipeline_name} with components: \n")
+                for key, operation in defined_pipeline.items():
+                    self.log.debug("component:\n "
+                                   f"operation name : {operation.name} \n "
+                                   f"inputs : {operation.inputs} \n "
+                                   f"outputs : {operation.outputs} \n ")
 
             # The exported pipeline is by default associated with
             # an experiment.
@@ -373,6 +372,7 @@ class KfpPipelineProcessor(RuntimePipelineProcessor):
     def _collect_envs(self, operation: Operation, **kwargs) -> Dict:
         """
         Amends envs collected from superclass with those pertaining to this subclass
+
         :return: dictionary containing environment name/value pairs
         """
         envs = super()._collect_envs(operation, **kwargs)
@@ -437,7 +437,7 @@ class KfpPipelineProcessor(RuntimePipelineProcessor):
             sanitized_operation_name = self._sanitize_operation_name(operation.name)
 
             # Create pipeline operation
-            # If operation is one of the "standard" set of NBs or scripts, construct custom NotebookOp
+            # If operation is one of the "standard" set of NBs or scripts, construct custom ExecuteFileOp
             if operation.classifier in ["execute-notebook-node", "execute-python-node", "execute-r-node"]:
 
                 operation_artifact_archive = self._get_dependency_archive_name(operation)
@@ -445,41 +445,33 @@ class KfpPipelineProcessor(RuntimePipelineProcessor):
                 self.log.debug("Creating pipeline component:\n {op} archive : {archive}".format(
                                op=operation, archive=operation_artifact_archive))
 
-                notebook_ops[operation.id] = NotebookOp(name=sanitized_operation_name,
-                                                        pipeline_name=pipeline_name,
-                                                        experiment_name=experiment_name,
-                                                        notebook=operation.filename,
-                                                        cos_endpoint=cos_endpoint,
-                                                        cos_bucket=cos_bucket,
-                                                        cos_directory=cos_directory,
-                                                        cos_dependencies_archive=operation_artifact_archive,
-                                                        pipeline_version=pipeline_version,
-                                                        pipeline_source=pipeline.source,
-                                                        pipeline_inputs=operation.inputs,
-                                                        pipeline_outputs=operation.outputs,
-                                                        pipeline_envs=pipeline_envs,
-                                                        emptydir_volume_size=emptydir_volume_size,
-                                                        cpu_request=operation.cpu,
-                                                        mem_request=operation.memory,
-                                                        gpu_limit=operation.gpu,
-                                                        workflow_engine=engine,
-                                                        image=operation.runtime_image,
-                                                        file_outputs={
-                                                            'mlpipeline-metrics':
-                                                                '{}/mlpipeline-metrics.json'
-                                                                .format(pipeline_envs['ELYRA_WRITABLE_CONTAINER_DIR']),
-                                                            'mlpipeline-ui-metadata':
-                                                                '{}/mlpipeline-ui-metadata.json'
-                                                                .format(pipeline_envs['ELYRA_WRITABLE_CONTAINER_DIR'])
-                                                        })
-                #########WRONG#####################
-                if pipeline_envs:
-                    input_list=[]
-                    for key, value in pipeline_envs.items():  # Convert dict entries to format kfp needs
-                        if key not in ['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY','ELYRA_ENABLE_PIPELINE_INFO','ELYRA_WRITABLE_CONTAINER_DIR']:
-                            input_list.append(key)
-                    notebook_ops[operation.id].inputs(input_list) #input parameter add  1-(4)
-                ##################################################
+                notebook_ops[operation.id] = ExecuteFileOp(name=sanitized_operation_name,
+                                                           pipeline_name=pipeline_name,
+                                                           experiment_name=experiment_name,
+                                                           notebook=operation.filename,
+                                                           cos_endpoint=cos_endpoint,
+                                                           cos_bucket=cos_bucket,
+                                                           cos_directory=cos_directory,
+                                                           cos_dependencies_archive=operation_artifact_archive,
+                                                           pipeline_version=pipeline_version,
+                                                           pipeline_source=pipeline.source,
+                                                           pipeline_inputs=operation.inputs,
+                                                           pipeline_outputs=operation.outputs,
+                                                           pipeline_envs=pipeline_envs,
+                                                           emptydir_volume_size=emptydir_volume_size,
+                                                           cpu_request=operation.cpu,
+                                                           mem_request=operation.memory,
+                                                           gpu_limit=operation.gpu,
+                                                           workflow_engine=engine,
+                                                           image=operation.runtime_image,
+                                                           file_outputs={
+                                                               'mlpipeline-metrics':
+                                                                   '{}/mlpipeline-metrics.json'
+                                                                   .format(pipeline_envs['ELYRA_WRITABLE_CONTAINER_DIR']),  # noqa
+                                                               'mlpipeline-ui-metadata':
+                                                                   '{}/mlpipeline-ui-metadata.json'
+                                                                   .format(pipeline_envs['ELYRA_WRITABLE_CONTAINER_DIR'])  # noqa
+                                                           })
 
                 # TODO Can we move all of this to apply to non-standard components as well? Test when servers are up
                 if cos_secret and not export:
@@ -568,6 +560,7 @@ class KfpPipelineProcessor(RuntimePipelineProcessor):
         Determine whether the specified URL is secured by Dex and, if username
         and password were provided, try to obtain a session cookie. Other forms
         of authentication are not supported.
+
         :param url: Kubeflow server URL, including protocol
         :type url: str
         :param username: Kubeflow user name, defaults to None
