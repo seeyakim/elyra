@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 #
 # Copyright 2018-2021 Elyra Authors
 #
@@ -17,18 +16,22 @@
 
 import os
 import string
+from typing import Dict
+from typing import List
+from typing import Optional
 
 from kfp.dsl import ContainerOp
-from kfp.dsl import InputArgumentPath
-from kfp_notebook import __version__
-from kubernetes.client.models import V1EmptyDirVolumeSource, V1EnvVar, V1Volume, V1VolumeMount
+from kubernetes.client.models import V1EmptyDirVolumeSource
+from kubernetes.client.models import V1EnvVar
 from kubernetes.client.models import V1EnvVarSource
 from kubernetes.client.models import V1ObjectFieldSelector
-from typing import Dict, List, Optional
+from kubernetes.client.models import V1Volume
+from kubernetes.client.models import V1VolumeMount
 
+from elyra._version import __version__
 
 """
-The NotebookOp uses a python script to bootstrap the user supplied image with the required dependencies.
+The ExecuteFileOp uses a python script to bootstrap the user supplied image with the required dependencies.
 In order for the script run properly, the image used, must at a minimum, have the 'curl' utility available
 and have python3
 """
@@ -39,21 +42,20 @@ INOUT_SEPARATOR = ';'
 
 ELYRA_GITHUB_ORG = os.getenv("ELYRA_GITHUB_ORG", "elyra-ai")
 ELYRA_GITHUB_BRANCH = os.getenv("ELYRA_GITHUB_BRANCH", "master" if 'dev' in __version__ else "v" + __version__)
-ELYRA_PIP_CONFIG_URL = os.getenv('ELYRA_PIP_CONFIG_URL', 'https://raw.githubusercontent.com/{org}/kfp-notebook/'
-                                                         '{branch}/etc/pip.conf'.
+ELYRA_PIP_CONFIG_URL = os.getenv('ELYRA_PIP_CONFIG_URL', 'https://raw.githubusercontent.com/{org}/elyra/'
+                                                         '{branch}/etc/kfp/pip.conf'.
                                                          format(org=ELYRA_GITHUB_ORG, branch=ELYRA_GITHUB_BRANCH))
 ELYRA_BOOTSTRAP_SCRIPT_URL = os.getenv('ELYRA_BOOTSTRAP_SCRIPT_URL', 'https://raw.githubusercontent.com/{org}/'
-                                                                     'kfp-notebook/{branch}/etc/docker-scripts/'
-                                                                     'bootstrapper.py'.
+                                                                     'elyra/{branch}/elyra/kfp/bootstrapper.py'.
                                                                      format(org=ELYRA_GITHUB_ORG,
                                                                             branch=ELYRA_GITHUB_BRANCH))
 ELYRA_REQUIREMENTS_URL = os.getenv('ELYRA_REQUIREMENTS_URL', 'https://raw.githubusercontent.com/{org}/'
-                                                             'kfp-notebook/{branch}/etc/requirements-elyra.txt'.
+                                                             'elyra/{branch}/etc/kfp/requirements-elyra.txt'.
                                                              format(org=ELYRA_GITHUB_ORG,
                                                                     branch=ELYRA_GITHUB_BRANCH))
 
 
-class NotebookOp(ContainerOp):
+class ExecuteFileOp(ContainerOp):
 
     def __init__(self,
                  pipeline_name: str,
@@ -198,28 +200,14 @@ class NotebookOp(ContainerOp):
                                          notebook=self.notebook,
                                          python_user_lib_path_target=self.python_user_lib_path_target)
                                  )
-            ##########3-(1)##########################################################
-            '''
+
             if self.pipeline_inputs:
                 inputs_str = self._artifact_list_to_str(self.pipeline_inputs)
                 argument_list.append('--inputs "{}" '.format(inputs_str))
-            '''
-            ##########3-(2)##########NOTREALLYSURE!!!!!!!!!!##############################
-            if self.pipeline_inputs:
-                input_file_list=[]
-                for input_file_pipeline in self.pipeline_inputs:
-                    input_file_list.append(InputArgumentPath(input=input_file_pipeline.rsplit('.')[0], path= '/jupyter-work-dir/{}'.format(input_file_pipeline)))
-                kwargs['artifact_argument_path']=input_file_list
-            #######################################################################
-
 
             if self.pipeline_outputs:
                 outputs_str = self._artifact_list_to_str(self.pipeline_outputs)
                 argument_list.append('--outputs "{}" '.format(outputs_str))
-                ####add here to add output artifacts####2-(1)###
-                for output_file_pipeline in self.pipeline_outputs:
-                    kwargs['file_outputs'][output_file_pipeline.rsplit('.')[0]] = '/jupyter-work-dir/{}'.format(output_file_pipeline)
-                ##############################################
 
             if self.emptydir_volume_size:
                 argument_list.append('--user-volume-path "{}" '.format(self.python_user_lib_path))
@@ -227,23 +215,13 @@ class NotebookOp(ContainerOp):
             kwargs['command'] = ['sh', '-c']
             kwargs['arguments'] = "".join(argument_list)
 
-
         super().__init__(**kwargs)
 
         # We must deal with the envs after the superclass initialization since these amend the
         # container attribute that isn't available until now.
-
-        #####1-(1)#######################################################################################################
         if self.pipeline_envs:
-            #input_list=[]
             for key, value in self.pipeline_envs.items():  # Convert dict entries to format kfp needs
-                if key not in ['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY','ELYRA_ENABLE_PIPELINE_INFO','ELYRA_WRITABLE_CONTAINER_DIR']:
-                    self.container.add_env_variable(V1EnvVar(name=key, value="{{inputs.parameters."+key+"}}"))
-                    #input_list.append(key)
-                else:
-                    self.container.add_env_variable(V1EnvVar(name=key, value=value))
-            #self.inputs(input_list) #input parameter add  1-(4)
-        ##################################################################################
+                self.container.add_env_variable(V1EnvVar(name=key, value=value))
 
         # If crio volume size is found then assume kubeflow pipelines environment is using CRI-o as
         # its container runtime
@@ -287,21 +265,20 @@ class NotebookOp(ContainerOp):
         # Attach metadata to the pod
         # Node type (a static type for this op)
         self.add_pod_label('elyra/node-type',
-                           NotebookOp._normalize_label_value(
+                           ExecuteFileOp._normalize_label_value(
                                'notebook-script'))
-
         # Pipeline name
         self.add_pod_label('elyra/pipeline-name',
-                           NotebookOp._normalize_label_value(self.pipeline_name))
+                           ExecuteFileOp._normalize_label_value(self.pipeline_name))
         # Pipeline version
         self.add_pod_label('elyra/pipeline-version',
-                           NotebookOp._normalize_label_value(self.pipeline_version))
+                           ExecuteFileOp._normalize_label_value(self.pipeline_version))
         # Experiment name
         self.add_pod_label('elyra/experiment-name',
-                           NotebookOp._normalize_label_value(self.experiment_name))
+                           ExecuteFileOp._normalize_label_value(self.experiment_name))
         # Pipeline node name
         self.add_pod_label('elyra/node-name',
-                           NotebookOp._normalize_label_value(kwargs.get('name')))
+                           ExecuteFileOp._normalize_label_value(kwargs.get('name')))
         # Pipeline node file
         self.add_pod_annotation('elyra/node-file-name',
                                 self.notebook)
